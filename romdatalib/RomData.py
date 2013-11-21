@@ -60,7 +60,8 @@ class RomData:
 			self._romdata[game_id] = []
 		
 		# TODO check if the rom already exists before to add it
-		self._romdata[game_id].append ({ "crc": crc, "md5": md5, "sha1": sha1, "size": size })
+		if not self.get_id_from_fingerprint (md5, "md5"):
+			self._romdata[game_id].append ({ "crc": crc, "md5": md5, "sha1": sha1, "size": size })
 	
 	def remove_id (self, game_id):
 		self._romdata.pop (game_id, None)
