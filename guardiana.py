@@ -3,7 +3,20 @@ from html.parser import HTMLParser
 import re
 from bs4 import BeautifulSoup
 
-from romdatalib import romdata
+systems = {
+	"master-system": "Master%20System",
+	"game-gear": "Game%20Gear",
+	"mega-drive": "Mega%20Drive",
+	"mega-cd": "Mega%20CD",
+	"sega-modem": "SEGA%20MODEM",
+	"laseractive-mega-ld": "LaserActive%20Mega%20LD",
+	"sega-pico": "SEGA%20PICO",
+	"mega-drive-32x": "Mega%20Drive%2032X",
+	"megacd-32x": "MegaCD-32X",
+	"dreamcast": "Dreamcast",
+	"naomi": "NAOMI",
+	"mega-tech": "Mega-Tech",
+}
 
 def get_game_list (system):
 	"""List all the games on Guardiana for a given system."""
@@ -41,7 +54,16 @@ def get_game_data (url):
 	
 	flags = ["error", "JP", "EU", "US", "CN", "BR", "pirate", "KR", "AU", "FR", "BE", "ES", "GB", "IT", "PT", "SE", "CA", "LU", "unknown", "not-understood"]
 	
-	response = urllib.request.urlopen (url)
+	response = None
+	i = 0
+	while response == None  and i < 5:
+		try:
+			response = urllib.request.urlopen (url)
+		except URLError:
+			pass
+	
+	if response == None:
+		raise URLError
 	
 	doc = response.read ()
 	
@@ -68,7 +90,6 @@ def get_game_data (url):
 		local_title = v.find ("td", {"class": "TextCenter", "colspan": "2"}).get_text ()
 		if local_title:
 			version["local_title"] = local_title
-			print (local_title)
 		
 		# Country
 		result = re.search("/img/flags/(\d+).gif", str (v))
@@ -110,9 +131,42 @@ def get_game_data (url):
 	return game_data
 
 if __name__ == "__main__":
+	from romdatalib.RomData import RomData
 	import json
+	import sys, argparse
 	
-	game_data = get_game_data ("http://www.guardiana.net/MDG-Database/Mega%20Drive/Sonic%20The%20Hedgehog%202/")
+	parser = argparse.ArgumentParser(description='Dump game informations from guardiana.net.')
+	parser.add_argument('system', metavar='system', nargs=1, help='the system to download', choices=systems.keys())
+	parser.add_argument('-o', '--output', dest='output', nargs=1, help='the file wich will receive the output')
 	
-	print (json.dumps(game_data, sort_keys=True, indent=4, separators=(',', ': ')))
+	args = parser.parse_args()
+	
+	system = args.system[0]
+	if args.output:
+		output = args.output[0]
+	else:
+		output = system + '.gamedata.json'
+	
+	print ('Downloading game list')
+	game_list = get_game_list (systems[system])
+	
+	game_data = {}
+	i = 1
+	n = str (len (game_list))
+	for game in game_list:
+		print ('Downloading game data ' + str(i).rjust(len (n)) + ' / ' + n + ' : ' + game["title"][0])
+		game_id = RomData.name_to_id (game["title"][0])
+		try:
+			game_data[game_id] = get_game_data (game["url"])
+		except URLError:
+			sys.stderr.write ("The program can't download " + game["url"] + ".\n")
+			sys.stderr.write ("Aborting.\n")
+			sys.exit (1)
+		i = i+1
+	
+	document = str (json.dumps(game_data, sort_keys=True, indent=4, separators=(',', ': ')))
+	
+	fd = open(output, 'w')
+	fd.write (document)
+	fd.close ()
 
