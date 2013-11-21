@@ -90,3 +90,78 @@ def _parse_from_words (words):
 def parse (filename):
 	return _parse_from_words (_get_words (filename))
 
+def game_to_rom (game, entries):
+        rom = {}
+        if is_tosec (entries):
+                rom["title"], rom["revision"], rom["game_flags"], rom["rom_flags"] = split_tosec_game_title (game["name"])
+        elif is_nointro (entries):
+                rom["title"], rom["other_flags"], rom["type_flags"] = split_nointro_game_title (game["name"])
+        else:
+                rom["title"] = game["title"]
+        
+        for e in ("size", "crc", "md5", "sha1"):
+                if e in game["rom"]:
+                        rom[e] = game["rom"][e].lower ()
+        
+        return rom
+
+def is_nointro (parsed_doc):
+	if "clrmamepro" in parsed_doc:
+		doc = parsed_doc["clrmamepro"][0]
+		
+		if "comment" in doc:
+			return "no-intro" in doc["comment"]
+	
+	return False
+
+def split_nointro_game_title(game):
+	'''Return a tuple containg the game title, the game flags and the ROM flags'''
+	title = ""
+	type_flags = ""
+	other_flags = ""
+	result = re.match(r'''^(\[[^\(\)]*\])?\s*([^\(\)\[\]]+) (\(?[^\[\]]*\)?)''', game)
+	if result:
+		type_flags = result.group(1)
+		title = result.group(2)
+		other_flags = result.group(3)
+	
+	return (title, other_flags, type_flags)
+
+def is_tosec (parsed_doc):
+	if "clrmamepro" in parsed_doc:
+		doc = parsed_doc["clrmamepro"][0]
+		
+		if "description" in doc:
+			return "TOSEC" in doc["description"]
+	
+	return False
+
+def split_tosec_game_title(game):
+	'''Return a tuple containg the game title, the game flags and the ROM flags'''
+	title = ""
+	revision = ""
+	game_flags = ""
+	rom_flags = ""
+	
+	result = re.match(r'''^([^\(\)\[\]]+) .*?(\(?[^\[\]]*\)?)(\[?[^\(\)]*\]?)''', game)
+	if result:
+		title = result.group(1)
+		game_flags = result.group(2)
+		rom_flags = result.group(3)
+	
+	result = re.match ("^(.*?) Rev (.*?)$", title)
+	if result:
+		title = result.group (1)
+		revision = result.group (2)
+	
+	result = re.match ("^(.*?) (v\d*\..*?)$", title)
+	if result:
+		title = result.group (1)
+		revision = result.group (2)
+	
+	return (title, revision, game_flags, rom_flags)
+
+def datefromiso(isoformat):
+	date = isoformat.split('-')
+	return datetime.date(int(date[0]), int(date[1]), int(date[2]))
+
