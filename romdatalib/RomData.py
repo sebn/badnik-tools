@@ -17,13 +17,15 @@ class RomData:
 				sys.stderr.write ("\"" + romdata_doc + "\" doesn't exists.\n")
 				self._romdata = {}
 			except ValueError:
-				sys.stderr.write ("The document \"" + romdata_doc + "\" isn't a ROMData document.\n")
+				sys.stderr.write ("The document \"" + romdata_doc + "\" isn't a RomData document.\n")
 				self._romdata = {}
 			finally:
 				if fd:
 					fd.close ()
 		else:
 			self._romdata = {}
+		
+		# TODO check if self._romdata is a valid RomData document, not just a valid JSON document
 	
 	def __str__(self):
 		return json.dumps(self._romdata, sort_keys=True, indent=4, separators=(',', ': '))
@@ -119,3 +121,4 @@ class RomData:
 			string = match.group(1)
 		
 		return string
+	

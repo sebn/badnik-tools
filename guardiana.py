@@ -2,6 +2,13 @@ import urllib
 from html.parser import HTMLParser
 import re
 from bs4 import BeautifulSoup
+from romdatalib.GameData import GameData
+from romdatalib.RomData import RomData
+from urllib.error import URLError
+
+#
+# Utility tables
+#
 
 systems = {
 	"master-system": "Master%20System",
@@ -17,6 +24,60 @@ systems = {
 	"naomi": "NAOMI",
 	"mega-tech": "Mega-Tech",
 }
+
+flags = [
+	"error",
+	"JP",
+	"EU",
+	"US",
+	"CN",
+	"BR",
+	"unlicenced",
+	"KR",
+	"AU",
+	"FR",
+	"BE",
+	"ES",
+	"GB",
+	"IT",
+	"PT",
+	"SE",
+	"CA",
+	"LU",
+	"unknown",
+	"homebrew"
+]
+
+#
+# Utility functions
+#
+
+def is_string_null (string):
+	string = html_get_text (string).lower ()
+	null = bool (not string or string == "" or string == "unknown")
+	return null
+
+def html_get_text (html):
+	text = "".join (re.split ("<.*?>", html))
+	
+	return text
+
+def split_date (d_m_y_date):
+	date = re.split('\D', d_m_y_date, maxsplit=2)
+	date.reverse ()
+	
+	int_date = []
+	for s in date:
+		int_date.append (int (s))
+	
+	while len (int_date) < 3:
+		int_date.append (None)
+	
+	return int_date
+
+#
+# Core Guardiana functions
+#
 
 def get_game_list (system):
 	"""List all the games on Guardiana for a given system."""
@@ -49,10 +110,12 @@ def get_game_list (system):
 	
 	return game_dict_list
 
-def get_game_data (url):
+def add_game_data_from_url (game_data, url):
 	"""Get a GameData object for the corresponding Guardiana URL."""
 	
-	flags = ["error", "JP", "EU", "US", "CN", "BR", "pirate", "KR", "AU", "FR", "BE", "ES", "GB", "IT", "PT", "SE", "CA", "LU", "unknown", "not-understood"]
+	#
+	# Download and read the page from Guardiana
+	#
 	
 	response = None
 	i = 0
@@ -66,72 +129,160 @@ def get_game_data (url):
 		raise URLError
 	
 	doc = response.read ()
-	
 	soup = BeautifulSoup(doc)
+	
+	#
+	# Get the common game data
+	#
+	
 	general_info_table = soup.find("table", {"class": "MDGD_GamesInfos"})
+	
+	common = { "title": None, "developer": None, "genre": None, "players": [0, 0], "tags": [] }
+	
+	result = re.findall ("<\s*div.*?databaseInfosDesc.*?>(.+?)<\s*/\s*div\s*>\s*<\s*div.*?databaseInfosContent.*?>(.+?)<\s*/\s*div\s*>", str (general_info_table))
+	
+	for info in result:
+		key = info[0].lower()
+		if key == "common title":
+			common["title"] = info[1]
+		elif key == "theme":
+			for tag in re.split ("\s*,\s*", info[1].strip().lower ()):
+				if not tag in common["tags"]:
+					common["tags"].append (tag)
+		elif key == "developer":
+			if not is_string_null (info[1]):
+				common["developer"] = html_get_text (info[1])
+		elif key == "genre":
+			if not is_string_null (info[1]):
+				common["genre"] = info[1]
+	
+	# Set the game's players number
+	game_players = general_info_table.find ("span", {"class": "GamePlayers1"}).get_text ()
+	if game_players:
+		game_players = game_players.split ('-', 1)
+		if len (game_players) > 1:
+			common["players"][0] =  int (game_players[0])
+			common["players"][1] =  int (game_players[1])
+		else:
+			common["players"][0] =  int (game_players[0])
+	
+	# The script can't do anything without the game's title
+	if not common["title"]:
+		return False
+	
+	# Get the game's ID from its title
+	game_id = RomData.name_to_id (common["title"])
+	
+	#
+	# Set the common game data
+	#
+	
+	game_data.set_title (game_id, common["title"])
+	game_data.set_developer (game_id, common["developer"])
+	game_data.set_genre (game_id, common["genre"])
+	game_data.set_players (game_id, common["players"][0], common["players"][1])
+	for tag in common["tags"]:
+		game_data.add_tag (game_id, tag)
+	
+	#
+	# Get the versions' data
+	#
+	
 	version_list = soup.find_all("div", {"class": "versionFiche"})
 	
-	game_data = {}
-	
-	result = re.findall ("<div.*?databaseInfosDesc.*?>(.+?)</div>\s*<div.*?databaseInfosContent.*?>(.+?)</div>", str (general_info_table))
-	for info in result:
-		game_data[info[0]] = info [1]
-	
-	game_data["players"] = general_info_table.find ("span", {"class": "GamePlayers1"}).get_text ()
-	
-	versions = []
 	for v in version_list:
-		version = {}
-		
-		# Title
-		version["title"] = v.find ("span", {"class": "MDGDVersionTitle"}).get_text ()
-		
-		# Local title
-		local_title = v.find ("td", {"class": "TextCenter", "colspan": "2"}).get_text ()
-		if local_title:
-			version["local_title"] = local_title
-		
 		# Country
+		v_country = flags[0]
 		result = re.search("/img/flags/(\d+).gif", str (v))
 		if result:
 			flag_nbr = int (result.group(1))
 			if flag_nbr < len (flags):
-				version["country"] = flags[flag_nbr]
-			else:
-				version["country"] = flags[0]
-		else:
-			version["country"] = flags[0]
+				v_country = flags[flag_nbr]
 		
-		# Cover
+		if game_data.contains_version (game_id, v_country):
+			continue
+		
+		#
+		# Set the version's title
+		#
+		
+		# Get the version's title
+		v_title = v.find ("span", {"class": "MDGDVersionTitle"}).get_text ()
+		result = re.match ("(.*?)\s*\((.*?)\)", v_title)
+		if result:
+			v_title = result.group (1)
+		
+		# Get the local title
+		v_local_title = v.find ("td", {"class": "TextCenter", "colspan": "2"}).get_text ()
+		if not is_string_null (v_local_title):
+			v_title = v_local_title
+		game_data.set_version_title (game_id, v_country, v_local_title)
+		
+		# If the version's title is the same as the common title, it should be null
+		if common["title"] == v_title:
+			v_title = None
+		
+		game_data.set_version_title (game_id, v_country, v_title)
+		
+		#
+		# Set the version's cover
+		#
+		
 		covers_soup = v.find ("div", {"class": "alternatecoverbox"})
-		covers = {}
+		v_cover = { "front": None, "back": None, "side": None }
+		
 		side = covers_soup.find ("img", {"alt": "Side / SpinCard"})
 		if side and "src" in side.attrs:
-			covers["side"] = side["src"]
+			v_cover["side"] = side["src"]
+		
 		front = covers_soup.find ("img", {"alt": "Front"})
 		if front and "src" in front.attrs:
-			covers["front"] = front["src"]
+			v_cover["front"] = front["src"]
+		
 		back = covers_soup.find ("img", {"alt": "Back"})
 		if back and "src" in back.attrs:
-			covers["back"] = back["src"]
-		full = covers_soup.find ("a", {"class": "fancybox_img"})
-		if full and "href" in full.attrs:
-			covers["full"] = full["href"]
-		version["covers"] = covers
+			v_cover["back"] = back["src"]
+		
+		game_data.set_version_cover (game_id, v_country, v_cover["front"], v_cover["back"], v_cover["side"])
 		
 		# Serial number, barcode, publisher, release date...
-		result = re.findall ("<div.*?databaseInfosDesc.*?>(.+?)</div>\s*<div.*?databaseInfosContent.*?>(.+?)</div>", str (v))
+		result = re.findall ("<\s*div.*?databaseInfosDesc.*?>(.+?)<\s*/\s*div\s*>\s*<\s*div.*?databaseInfosContent.*?>(.+?)<\s*/\s*div\s*>", str (v))
 		for info in result:
-			version[info[0]] = info [1]
-		
-		versions.append (version)
+			key = info[0].lower()
+			if key == "publisher":
+				if not is_string_null (info[1]):
+					game_data.set_version_publisher (game_id, v_country, html_get_text (info[1]))
+			
+			# Release date
+			elif key == "release date":
+				if not is_string_null (info[1]):
+					v_date = split_date (info[1])
+					game_data.set_version_release_date (game_id, v_country, v_date [0], v_date [1], v_date [2])
 	
-	game_data["versions"] = versions
+	return True
+
+def get_game_data_from_guardiana ():
+	print ('Downloading game list')
+	game_list = get_game_list (systems[system])
+	
+	game_data = GameData ()
+	i = 1
+	n = str (len (game_list))
+	for game in game_list:
+		print ('Downloading game data ' + str(i).rjust(len (n)) + ' / ' + n + ' : ' + game["title"][0])
+		
+		try:
+			while not add_game_data_from_url (game_data, game["url"]):
+				pass
+		except URLError:
+			sys.stderr.write ("The program can't download " + game["url"] + ".\n")
+			sys.stderr.write ("Aborting.\n")
+			sys.exit (1)
+		i = i+1
 	
 	return game_data
 
 if __name__ == "__main__":
-	from romdatalib.RomData import RomData
 	import json
 	import sys, argparse
 	
@@ -147,26 +298,9 @@ if __name__ == "__main__":
 	else:
 		output = system + '.gamedata.json'
 	
-	print ('Downloading game list')
-	game_list = get_game_list (systems[system])
-	
-	game_data = {}
-	i = 1
-	n = str (len (game_list))
-	for game in game_list:
-		print ('Downloading game data ' + str(i).rjust(len (n)) + ' / ' + n + ' : ' + game["title"][0])
-		game_id = RomData.name_to_id (game["title"][0])
-		try:
-			game_data[game_id] = get_game_data (game["url"])
-		except URLError:
-			sys.stderr.write ("The program can't download " + game["url"] + ".\n")
-			sys.stderr.write ("Aborting.\n")
-			sys.exit (1)
-		i = i+1
-	
-	document = str (json.dumps(game_data, sort_keys=True, indent=4, separators=(',', ': ')))
+	game_data = get_game_data_from_guardiana ()
 	
 	fd = open(output, 'w')
-	fd.write (document)
+	fd.write (str (game_data))
 	fd.close ()
 
