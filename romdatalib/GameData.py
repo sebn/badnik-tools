@@ -79,8 +79,7 @@ class GameData:
 	def get_title (self, game_id):
 		if game_id in self._gamedata:
 			return self._gamedata[game_id]["title"]
-		else:
-			return None
+		return None
 	
 	def add_developer (self, game_id, developer):
 		self._init_game (game_id)
@@ -103,6 +102,12 @@ class GameData:
 		# TODO check if min_players and max_players are valid values
 		self._gamedata[game_id]["players"]["min"] = min_players
 		self._gamedata[game_id]["players"]["max"] = max (min_players, max_players)
+	
+	
+	def get_players (self, game_id):
+		if game_id in self._gamedata:
+			return (self._gamedata[game_id]["players"]["min"], self._gamedata[game_id]["players"]["max"])
+		return None
 	
 	def add_tag (self, game_id, tag):
 		self._init_game (game_id)
