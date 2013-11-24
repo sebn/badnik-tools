@@ -60,7 +60,9 @@ def is_string_null (string):
 def html_get_text (html):
 	text = "".join (re.split ("<.*?>", html))
 	
-	return text
+	pars = HTMLParser()
+	
+	return pars.unescape (text)
 
 def split_date (d_m_y_date):
 	date = re.split('\D', d_m_y_date, maxsplit=2)
@@ -110,6 +112,13 @@ def get_game_list (system):
 	
 	return game_dict_list
 
+def get_title_screenshot (guardiana_soup):
+	result = re.search("(/media/title/\w*\.\w*)", str (guardiana_soup))
+	if result:
+		return "http://www.guardiana.net" + result.group(1)
+	else:
+		return None
+
 def add_game_data_from_url (game_data, url):
 	"""Get a GameData object for the corresponding Guardiana URL."""
 	
@@ -137,24 +146,30 @@ def add_game_data_from_url (game_data, url):
 	
 	general_info_table = soup.find("table", {"class": "MDGD_GamesInfos"})
 	
-	common = { "title": None, "developer": None, "genre": None, "players": [0, 0], "tags": [] }
+	common = { "title": None, "developers": [], "genres": [], "players": [0, 0], "tags": [] }
 	
 	result = re.findall ("<\s*div.*?databaseInfosDesc.*?>(.+?)<\s*/\s*div\s*>\s*<\s*div.*?databaseInfosContent.*?>(.+?)<\s*/\s*div\s*>", str (general_info_table))
 	
 	for info in result:
 		key = info[0].lower()
+		value = html_get_text (info[1]).strip ()
 		if key == "common title":
-			common["title"] = info[1]
+			common["title"] = value
 		elif key == "theme":
-			for tag in re.split ("\s*,\s*", info[1].strip().lower ()):
-				if not tag in common["tags"]:
-					common["tags"].append (tag)
+			key = "tags"
+			for item in re.split ("\s*,\s*", value.lower ()):
+				if not item in common[key]:
+					common[key].append (item)
 		elif key == "developer":
-			if not is_string_null (info[1]):
-				common["developer"] = html_get_text (info[1])
+			key = "developers"
+			for item in re.split ("\s*/\s*", value):
+				if not is_string_null (item) and not item in common[key]:
+					common[key].append (item)
 		elif key == "genre":
-			if not is_string_null (info[1]):
-				common["genre"] = info[1]
+			key = "genres"
+			for item in re.split ("\s*/\s*", value):
+				if not item in common[key]:
+					common[key].append (item)
 	
 	# Set the game's players number
 	game_players = general_info_table.find ("span", {"class": "GamePlayers1"}).get_text ()
@@ -178,11 +193,15 @@ def add_game_data_from_url (game_data, url):
 	#
 	
 	game_data.set_title (game_id, common["title"])
-	game_data.set_developer (game_id, common["developer"])
-	game_data.set_genre (game_id, common["genre"])
+	for developer in common["developers"]:
+		game_data.add_developer (game_id, developer)
+	for genre in common["genres"]:
+		game_data.add_genre (game_id, genre)
 	game_data.set_players (game_id, common["players"][0], common["players"][1])
 	for tag in common["tags"]:
 		game_data.add_tag (game_id, tag)
+	
+	game_data.add_screenshot (game_id, get_title_screenshot (soup))
 	
 	#
 	# Get the versions' data
@@ -207,13 +226,13 @@ def add_game_data_from_url (game_data, url):
 		#
 		
 		# Get the version's title
-		v_title = v.find ("span", {"class": "MDGDVersionTitle"}).get_text ()
+		v_title = html_get_text (v.find ("span", {"class": "MDGDVersionTitle"}).get_text ())
 		result = re.match ("(.*?)\s*\((.*?)\)", v_title)
 		if result:
 			v_title = result.group (1)
 		
 		# Get the local title
-		v_local_title = v.find ("td", {"class": "TextCenter", "colspan": "2"}).get_text ()
+		v_local_title = html_get_text (v.find ("td", {"class": "TextCenter", "colspan": "2"}).get_text ())
 		if not is_string_null (v_local_title):
 			v_title = v_local_title
 		game_data.set_version_title (game_id, v_country, v_local_title)
